@@ -1,0 +1,135 @@
+---
+title: "Predicting Excercise Type and Execution Quality"
+author: "Johan Mudsam"
+output: html_document
+---
+# Executive Summary
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+## Execuction
+In this project we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+For the purpose of this Coursera report the data set has been split into a training set and a test set. We loaded the data and pre-processed it to remove not applicable variables, variables with a majority if NA values and variables with zero variability. The training data was split further into a training set and a validation set. The model was trained on the training set and cross-validated using the validation set. Finally an outcome was predicted using the initial test data set.
+
+## Outcome
+We were able to predict the excercise type and execution quality for all cases in the provided test data using a Random Forest model. The out of sample error rate for the model is 0.22%. 
+
+#Setup R Environment
+```{r}
+library(caret)
+library(randomForest)
+setwd("~/coursera/ml")
+```
+
+#Data Processing
+
+Start by loading the training and testing datasets.
+```{r cache=TRUE}
+if (!file.exists('pml-training.csv')) {
+    download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 'pml-training.csv', method="curl")
+}
+train_data <- read.csv('pml-training.csv', na.strings=c("", "NA", "#DIV/0!"))
+if (!file.exists('pml-testing.csv')) {
+    download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', 'pml-testing.csv', method="curl")
+}
+test_data <- read.csv('pml-testing.csv', na.strings=c("", "NA", "#DIV/0!"))
+```
+
+Exclude variable with no predictive value from the training dataset.
+```{r cache=TRUE}
+train_data$X <- NULL
+train_data$user_name <- NULL
+train_data$raw_timestamp_part_1 <- NULL
+train_data$raw_timestamp_part_2 <- NULL
+train_data$cvtd_timestamp <- NULL
+```
+
+The data consists of a lot of variables that have a marjority of NA values. Variables with NA values cannot be used for prediction so we remove them from the training dataset.
+```{r cache=TRUE}
+NAs <- apply(train_data,2,function(x) {sum(is.na(x))})
+train_data <- train_data[,which(NAs == 0)]
+```
+
+Remove variables with low variability.
+```{r cache=TRUE}
+nsv <- nearZeroVar(train_data)
+train_data <- train_data[-nsv]
+```
+
+We're left with these variables to be used for modelling
+```{r}
+names(train_data)
+```
+
+# Data Exploration
+```{r}
+summary(train_data$classe)
+qplot(classe, data=train_data, fill=classe)
+```
+
+# Modeling
+
+##Cross Validation
+Split the training data set further into training and testing data sets. We're using a 70/30 split.
+```{r}
+set.seed(42)
+inTrain <- createDataPartition(y = train_data$classe, p = 0.7, list = FALSE)
+training <- train_data[inTrain, ]
+testing <- train_data[-inTrain, ]
+```
+
+##Fit model
+The authors of the original report selected Random Forest as the best performing model for the data so we use that here as well. Setup a random forest model with 2000 branches.
+```{r cache=TRUE}
+mod.rf <- randomForest(classe~., training, ntree=2000)
+print(mod.rf)
+```
+```{r echo=FALSE}
+error <- (1 - mean(mod.rf$predicted == training$classe)) * 100
+```
+Random Forest performs already performs cross-validation as part of model fitting. However since the assignment explicitly calls out the need for cross-validation we will peform one here. The out of bag error rate is `r round(error,2)`%. It's expected that the error rate for the training data to be lower that that for the testing data.
+
+###Cross-Validation
+We perform cross-validation on the testing part of the data to calculate the out of sample error.
+```{r}
+pred.testing <- predict(mod.rf, newdata=testing)
+cm.testing <- confusionMatrix(pred.testing, testing$classe)
+print(cm.testing)
+```
+```{r echo=FALSE}
+error <- (1 - mean(pred.testing == testing$classe)) * 100
+```
+The out of sample error is `r round(error,2)`%. In this case the out of sample error rate is lower thann the in sample error rate. Typically this does not happen but is not an indicator that anything is wrong with the model.
+
+###Variable Importance
+```{r}
+varImpPlot(mod.rf)
+```
+
+It looks like it should be possible to get a good prediction with fewer parameters. This will be left for future investigation.
+
+#Outcome
+
+##Prediction
+Now that we have a fully trained model we can predict the classe outcome of the provided test data.
+```{r}
+pred.assignment <- predict(mod.rf, newdata=test_data)
+print(pred.assignment)
+```
+
+##Output Results
+We store the predictions in files to enable us to submit them for grading. The achieved score was 20/20, all predictions were correct.
+```{r}
+pml_write_files = function(x) {
+    n = length(x)
+    for(i in 1:n) {
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,
+                    row.names=FALSE,col.names=FALSE)
+    }
+}
+pml_write_files(pred.assignment)
+```
+
